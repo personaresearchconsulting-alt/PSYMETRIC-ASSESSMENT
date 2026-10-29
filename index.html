@@ -73,6 +73,12 @@
             transition: 0.3s;
         }
 
+        button:disabled {
+            opacity: 0.7;
+            cursor: wait;
+            transform: none;
+        }
+
         button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(212, 175, 55, 0.4);
@@ -191,19 +197,97 @@
     </div>
 
     <script>
-        function checkPass() {
-            const pass = document.getElementById('passInput').value;
-            // Password yang valid: psikoanalisa atau alfiannn
-            if (pass === "psikoanalisa" || pass === "alfiannn") {
+        // URL Web App Apps Script yang terhubung ke Google Sheets.
+        const PASSWORD_API_URL = 'https://script.google.com/macros/s/AKfycbxRW0SbZqbDVW0jvNzRmdLhSRinwDv9axtIGdzosB13SyeQMe9gmilAvsO1KbvdvEW4Tg/exec';
+
+        function getDeviceId() {
+            const storageKey = 'psymetric_device_id_v1';
+            let deviceId = '';
+
+            try {
+                deviceId = localStorage.getItem(storageKey) || '';
+                if (!deviceId) {
+                    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                        deviceId = window.crypto.randomUUID();
+                    } else {
+                        deviceId = 'dev-' + Date.now().toString(36) + '-' +
+                            Math.random().toString(36).slice(2) +
+                            Math.random().toString(36).slice(2);
+                    }
+                    localStorage.setItem(storageKey, deviceId);
+                }
+            } catch (error) {
+                // Jika localStorage diblokir, ID sementara hanya berlaku untuk sesi ini.
+                deviceId = 'session-' + Date.now().toString(36) + '-' +
+                    Math.random().toString(36).slice(2);
+            }
+
+            return deviceId;
+        }
+
+        async function checkPass() {
+            const input = document.getElementById('passInput');
+            const button = document.querySelector('#login-screen button');
+            const pass = input.value.trim();
+
+            if (!pass) {
+                alert('Masukkan password terlebih dahulu.');
+                input.focus();
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'MEMERIKSA...';
+
+            try {
+                const response = await fetch(PASSWORD_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        // text/plain menghindari preflight CORS untuk request ini.
+                        'Content-Type': 'text/plain;charset=utf-8'
+                    },
+                    body: JSON.stringify({
+                        password: pass,
+                        deviceId: getDeviceId()
+                    }),
+                    redirect: 'follow'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Server merespons HTTP ' + response.status);
+                }
+
+                const result = await response.json();
+
+                if (!result || result.success !== true) {
+                    alert((result && result.message) || 'Password tidak valid.');
+                    return;
+                }
+
+                // Simpan status sesi hanya untuk kenyamanan tampilan.
+                // Validasi otoritatif tetap dilakukan oleh Apps Script saat login.
+                sessionStorage.setItem('psymetric_login_ok', '1');
+                sessionStorage.setItem('psymetric_permanent', result.permanent ? '1' : '0');
+                if (result.expiresAt) {
+                    sessionStorage.setItem('psymetric_expires_at', result.expiresAt);
+                }
+
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('main-menu').style.display = 'block';
-            } else {
-                alert("Password Salah!");
+            } catch (error) {
+                console.error('Kesalahan login PSYMETRIC:', error);
+                alert(
+                    'Tidak dapat menghubungi server password. Periksa koneksi internet, ' +
+                    'URL Web App Apps Script, dan pengaturan deployment.'
+                );
+            } finally {
+                button.disabled = false;
+                button.textContent = 'MASUK';
             }
         }
 
-        // Support Enter Key
-        document.getElementById('passInput').addEventListener('keypress', function (e) {
+        // Dukungan tombol Enter.
+        document.getElementById('passInput').addEventListener('keydown', function (e) {
             if (e.key === 'Enter') {
                 checkPass();
             }
